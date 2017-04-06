@@ -12,11 +12,17 @@ lval *lval_num(long x) {
     return v;
 }
 
-lval *lval_err(char *message) {
+lval *lval_err(char *fmt, ...) {
     lval *v = malloc(sizeof(lval));
     v->type = LVAL_ERR;
-    v->err = malloc(strlen(message) +1);
-    strcpy(v->err, message);
+
+    va_list va;
+    va_start(va, fmt);
+    v->err = malloc(512);
+    vsnprintf(v->err, 511, fmt, va);
+    v->err = realloc(v->err, strlen(v->err) +1);
+    va_end(va);
+
     return v;
 }
 
@@ -46,6 +52,7 @@ lval *lval_qexpr(void) {
 
 void lval_del(lval *v) {
     switch (v->type) {
+        case LVAL_FUN:
         case LVAL_NUM:
             break;
         case LVAL_ERR:
@@ -84,8 +91,9 @@ void lval_expr_print(lval *v, char open, char close) {
 
 void lval_print(lval *v) {
     switch(v->type) {
-        case LVAL_NUM: printf("%li", v->num); break;
         case LVAL_ERR: printf("Error: %s", v->err); break;
+        case LVAL_FUN: printf("<function>"); break;
+        case LVAL_NUM: printf("%li", v->num); break;
         case LVAL_SYM: printf("%s", v->sym); break;
         case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
         case LVAL_QEXPR: lval_expr_print(v, '{', '}'); break;
@@ -97,10 +105,50 @@ void lval_println(lval *v) {
     putchar('\n');
 }
 
-lval *lval_eval(lval *v) {
-    if (v->type == LVAL_SEXPR) {
-        return lval_eval_sexpr(v);
+lval *lval_copy(lval *v) {
+
+    lval *x = malloc(sizeof(lval));
+    x->type = v->type;
+
+    switch (v->type) {
+        case LVAL_FUN: x->func = v->func; break;
+        case LVAL_NUM: x->num = v->num; break;
+        case LVAL_ERR:
+            x->err = malloc(strlen(v->err) + 1);
+            strcpy(x->err, v->err);
+            break;
+        case LVAL_SYM:
+            x->sym = malloc(strlen(v->sym) + 1);
+            strcpy(x->sym, v->sym);
+            break;
+        case LVAL_SEXPR:
+        case LVAL_QEXPR:
+            x->count = v->count;
+            x->cell = malloc(sizeof(lval*) * x->count);
+            for (int i=0; i < x->count; i++) {
+                x->cell[i] = lval_copy(v->cell[i]);
+            }
+            break;
     }
+    return x;
+}
+
+lval *lval_eval(lenv *e, lval *v) {
+    if (v->type == LVAL_SYM) {
+        lval *x =lenv_get(e, v);
+        lval_del(v);
+        return x;
+    }
+    if (v->type == LVAL_SEXPR) {
+        return lval_eval_sexpr(e, v);
+    }
+    return v;
+}
+
+lval *lval_func(lbuiltin func) {
+    lval *v = malloc(sizeof(lval));
+    v->type = LVAL_FUN;
+    v->func = func;
     return v;
 }
 
@@ -126,10 +174,10 @@ lval *lval_join(lval *x, lval *y) {
     return x;
 }
 
-lval * lval_eval_sexpr(lval *v) {
+lval * lval_eval_sexpr(lenv *e, lval *v) {
     /* Evaluate Children */
     for (int i = 0; i < v->count; i++) {
-        v->cell[i] = lval_eval(v->cell[i]);
+        v->cell[i] = lval_eval(e, v->cell[i]);
     }
 
     /* Error Checking */
@@ -143,17 +191,14 @@ lval * lval_eval_sexpr(lval *v) {
     /* Single Expression */
     if (v->count == 1) return lval_take(v, 0);
 
-    /* Ensure First Element is Symbol */
-    lval *first = lval_pop(v, 0);
-    if (first->type != LVAL_SYM) {
-        lval_del(first);
+    lval *f = lval_pop(v, 0);
+    if (f->type != LVAL_FUN) {
         lval_del(v);
-        return lval_err("S-Expression does not start with symbol'");
+        lval_del(f);
+        return lval_err("First element is not a function!");
     }
-
-    /* Call Builtin with operator */
-    lval *result = builtin(v, first->sym);
-    lval_del(first);
+    lval *result = f->func(e, v);
+    lval_del(f);
     return result;
 }
 

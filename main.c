@@ -5,6 +5,7 @@
 
 #include "mpc.h"
 #include "lval.h"
+#include "builtin.h"
 
 
 int main(int argc, char **argv) {
@@ -21,9 +22,7 @@ int main(int argc, char **argv) {
     mpca_lang(MPCA_LANG_DEFAULT,
               "                                                                                              \
                number   : /-?[0-9]+/;                                                                        \
-               symbol   : '+' | '-' | '*' | '/' | '%' | '^' | /min/ | /max/ | /add/ | /sub/ | /mul/ | /div/  \
-                        | \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | \"cons\" | \"len\"          \
-                        | \"init\";                                                                          \
+               symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;                                                 \
                expr     : <number> | <symbol> | <sexpr> | <qexpr>;                                           \
                sexpr    : '(' <expr>* ')';                                                                   \
                qexpr    : '{' <expr>* '}';                                                                   \
@@ -34,13 +33,17 @@ int main(int argc, char **argv) {
 
     puts("OLisp v0");
     puts("Press Ctrl+c to exit.");
+
+    lenv *e = lenv_new();
+    register_builtins(e);
+
     while (1) {
         char *input = readline("()lisp> ");
         add_history(input);
 
         if (mpc_parse("<stdin>", input, OLisp, &result)) {
             /* mpc_ast_print(result.output); */
-            lval *x = lval_eval(lval_read(result.output));
+            lval *x = lval_eval(e, lval_read(result.output));
             lval_println(x);
             lval_del(x);
             mpc_ast_delete(result.output);
@@ -51,6 +54,7 @@ int main(int argc, char **argv) {
         free(input);
     }
 
+    lenv_del(e);
     mpc_cleanup(6, Number, Symbol, Expr, Sexpr, Qexpr, OLisp);
     return 0;
 }

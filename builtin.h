@@ -3,6 +3,6 @@
 
 #include "lval.h"
 
-lval *builtin(lval *a, char *func);
+void register_builtins(lenv *e);
 
 #endif //OLISP_BUILTIN_H

@@ -3,7 +3,19 @@
 
 #include "builtin.h"
 
-#define LASSERT(args, cond, err_msg) if (!(cond)) {lval_del(args); return lval_err(err_msg);}
+#define LASSERT(args, cond, fmt, ...) if (!(cond)) {lval_del(args); return lval_err(fmt, ##__VA_ARGS__);}
+
+char *ltype_name(int t) {
+    switch(t) {
+        case LVAL_FUN: return "Function";
+        case LVAL_NUM: return "Number";
+        case LVAL_ERR: return "Error";
+        case LVAL_SYM: return "Symbol";
+        case LVAL_SEXPR: return "S-expr";
+        case LVAL_QEXPR: return "Q-expr";
+        default: return "Unknown";
+    }
+}
 
 lval *eval_op(lval *x, char *op, lval*y) {
     if (strncmp(op, "+", 1) == 0 || strncmp(op, "add", 3) == 0) x->num += y->num;
@@ -32,7 +44,7 @@ lval *eval_op(lval *x, char *op, lval*y) {
     return x;
 }
 
-lval *builtin_op(lval *v, char *op) {
+lval *builtin_op(lenv *e, lval *v, char *op) {
 
     for (int i = 0; i < v->count; i++) {
         if (v->cell[i]->type != LVAL_NUM) {
@@ -55,7 +67,7 @@ lval *builtin_op(lval *v, char *op) {
     return x;
 }
 
-lval *builtin_cons(lval *a) {
+lval *builtin_cons(lenv *e, lval *a) {
     LASSERT(a, a->count > 1, "Function `cons` passed too few arguments");
     LASSERT(a, a->count < 3, "Function `cons` passed too many arguments");
     LASSERT(a, a->cell[1]->type == LVAL_QEXPR, "Function `cons` passed incorrect types");
@@ -71,16 +83,36 @@ lval *builtin_cons(lval *a) {
     return q;
 }
 
-lval *builtin_eval(lval *a) {
+lval *builtin_def(lenv *e, lval *a) {
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `def` passed incorrect type!");
+    lval *syms = a->cell[0];
+
+    /* Ensure all elements of first list are symbols */
+    for (int i = 0; i < syms->count; i ++) {
+        LASSERT(a, syms->cell[i]->type == LVAL_SYM, "Function `def` cannot define non-symbol!");
+    }
+
+    /* Check correct number of symbols and values */
+    LASSERT(a, syms->count == a->count - 1, "Function `def` connot define incorrect number of values to symbols");
+
+    for (int i = 0; i < syms->count; i ++) {
+        lenv_put(e, syms->cell[i], a->cell[i + 1]);
+    }
+
+    lval_del(a);
+    return lval_sexpr();
+}
+
+lval *builtin_eval(lenv *e, lval *a) {
     LASSERT(a, a->count == 1, "Function `eval` passed too many arguments");
     LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `eval` passed incorrect types!");
 
     lval *x = lval_take(a, 0);
     x->type = LVAL_SEXPR;
-    return lval_eval(x);
+    return lval_eval(e, x);
 }
 
-lval *builtin_join(lval *a) {
+lval *builtin_join(lenv *e, lval *a) {
     for (int i=0; i < a->count; i++) {
         LASSERT(a, a->cell[i]->type == LVAL_QEXPR, "Function `join` passed incorrect types!");
     }
@@ -93,9 +125,11 @@ lval *builtin_join(lval *a) {
     return x;
 }
 
-lval *builtin_head(lval *a) {
-    LASSERT(a, a->count == 1, "Function `head` passed too many arguments");
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `head` passed incorrect types!");
+lval *builtin_head(lenv *e, lval *a) {
+    LASSERT(a, a->count == 1, "Function `head` passed too many arguments. Got %i, Expected %i", a->count, 1);
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+            "Function `head` passed incorrect type for argument 0. Got %s, expected %s",
+            ltype_name(a->cell[0]->type), ltype_name(LVAL_QEXPR));
     LASSERT(a, a->cell[0]->count != 0, "Function `head` passed {}!");
 
     lval *v =lval_take(a, 0);
@@ -105,7 +139,7 @@ lval *builtin_head(lval *a) {
     return v;
 }
 
-lval *builtin_init(lval *a) {
+lval *builtin_init(lenv *e, lval *a) {
     LASSERT(a, a->count == 1, "Function `init` passed too many arguments");
     LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `init` passed incorrect types!");
     LASSERT(a, a->cell[0]->count != 0, "Function `init` passed {}!");
@@ -115,7 +149,7 @@ lval *builtin_init(lval *a) {
     return v;
 }
 
-lval *builtin_len(lval *a) {
+lval *builtin_len(lenv *e, lval *a) {
     LASSERT(a, a->count == 1, "Function `len` passed too many arguments");
     LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `len` passed incorrect types!");
     lval *v = lval_take(a, 0);
@@ -124,12 +158,12 @@ lval *builtin_len(lval *a) {
     return result;
 }
 
-lval *builtin_list(lval *a) {
+lval *builtin_list(lenv *e, lval *a) {
     a->type = LVAL_QEXPR;
     return a;
 }
 
-lval *builtin_tail(lval *a) {
+lval *builtin_tail(lenv *e, lval *a) {
     LASSERT(a, a->count == 1, "Function `tail` passed too many arguments");
     LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `tail` passed incorrect types!");
     LASSERT(a, a->cell[0]->count != 0, "Function `tail` passed {}!");
@@ -139,16 +173,55 @@ lval *builtin_tail(lval *a) {
     return v;
 }
 
-lval *builtin(lval *a, char *func) {
-    if (strcmp("cons", func) == 0) { return builtin_cons(a); }
-    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
-    if (strcmp("head", func) == 0) { return builtin_head(a); }
-    if (strcmp("init", func) == 0) { return builtin_init(a); }
-    if (strcmp("join", func) == 0) { return builtin_join(a); }
-    if (strcmp("len", func) == 0) { return builtin_len(a); }
-    if (strcmp("list", func) == 0) { return builtin_list(a); }
-    if (strcmp("tail", func) == 0) { return builtin_tail(a); }
-    else {
-        return builtin_op(a, func);
-    }
+lval *builtin_add(lenv *e, lval *a) {
+    return builtin_op(e, a, "+");
+}
+lval *builtin_sub(lenv *e, lval *a) {
+    return builtin_op(e, a, "-");
+}
+lval *builtin_mul(lenv *e, lval *a) {
+    return builtin_op(e, a, "*");
+}
+lval *builtin_div(lenv *e, lval *a) {
+    return builtin_op(e, a, "/");
+}
+lval *builtin_pow(lenv *e, lval *a) {
+    return builtin_op(e, a, "");
+}
+lval *builtin_mod(lenv *e, lval *a) {
+    return builtin_op(e, a, "%");
+}
+lval *builtin_min(lenv *e, lval *a) {
+    return builtin_op(e, a, "min");
+}
+lval *builtin_max(lenv *e, lval *a) {
+    return builtin_op(e, a, "max");
+}
+
+void lenv_add_builtin(lenv *e, char *name, lbuiltin func) {
+    lval *k = lval_sym(name);
+    lval *v = lval_func(func);
+    lenv_put(e, k, v);
+    lval_del(k);
+    lval_del(v);
+}
+
+void register_builtins(lenv *e) {
+    lenv_add_builtin(e, "cons", builtin_cons);
+    lenv_add_builtin(e, "def", builtin_def);
+    lenv_add_builtin(e, "eval", builtin_eval);
+    lenv_add_builtin(e, "head", builtin_head);
+    lenv_add_builtin(e, "init", builtin_init);
+    lenv_add_builtin(e, "join", builtin_join);
+    lenv_add_builtin(e, "len", builtin_len);
+    lenv_add_builtin(e, "list", builtin_list);
+    lenv_add_builtin(e, "tail", builtin_tail);
+    lenv_add_builtin(e, "+", builtin_add);
+    lenv_add_builtin(e, "-", builtin_sub);
+    lenv_add_builtin(e, "*", builtin_mul);
+    lenv_add_builtin(e, "/", builtin_div);
+    lenv_add_builtin(e, "^", builtin_pow);
+    lenv_add_builtin(e, "%", builtin_mod);
+    lenv_add_builtin(e, "min", builtin_min);
+    lenv_add_builtin(e, "max", builtin_max);
 }
