@@ -53,6 +53,11 @@ lval *lval_qexpr(void) {
 void lval_del(lval *v) {
     switch (v->type) {
         case LVAL_FUN:
+            if (!v->builtin) {
+                lenv_del(v->env);
+                lval_del(v->formals);
+                lval_del(v->body);
+            }
         case LVAL_NUM:
             break;
         case LVAL_ERR:
@@ -92,7 +97,17 @@ void lval_expr_print(lval *v, char open, char close) {
 void lval_print(lval *v) {
     switch(v->type) {
         case LVAL_ERR: printf("Error: %s", v->err); break;
-        case LVAL_FUN: printf("<function>"); break;
+        case LVAL_FUN:
+            if (v->builtin) {
+                printf("<function>");
+            } else {
+                printf("(\\ ");
+                lval_print(v->formals);
+                putchar(' ');
+                lval_print(v->body);
+                putchar(')');
+            }
+            break;
         case LVAL_NUM: printf("%li", v->num); break;
         case LVAL_SYM: printf("%s", v->sym); break;
         case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
@@ -111,7 +126,16 @@ lval *lval_copy(lval *v) {
     x->type = v->type;
 
     switch (v->type) {
-        case LVAL_FUN: x->func = v->func; break;
+        case LVAL_FUN:
+            if (v->builtin) {
+                x->builtin = v->builtin;
+            } else {
+                x->builtin = NULL;
+                x->env = lenv_copy(v->env);
+                x->formals = lval_copy(v->formals);
+                x->body = lval_copy(v->body);
+            }
+            break;
         case LVAL_NUM: x->num = v->num; break;
         case LVAL_ERR:
             x->err = malloc(strlen(v->err) + 1);
@@ -148,8 +172,82 @@ lval *lval_eval(lenv *e, lval *v) {
 lval *lval_func(lbuiltin func) {
     lval *v = malloc(sizeof(lval));
     v->type = LVAL_FUN;
-    v->func = func;
+    v->builtin = func;
     return v;
+}
+
+lval *lval_lambda(lval* formals, lval *body) {
+    lval *v =malloc(sizeof(lval));
+    v->type = LVAL_FUN;
+    /* builtin is set to NULL to separate builtins from user-defined functions */
+    v->builtin = NULL;
+    v->env = lenv_new();
+
+    v->formals = formals;
+    v->body = body;
+    return v;
+}
+
+lval *lval_call(lenv *e, lval *f, lval *a) {
+    if (f->builtin) { return f->builtin(e, a);}
+
+    int given = a->count;
+    int total = f->formals->count;
+
+    while (a->count) {
+        if (f->formals->count == 0) {
+            lval_del(a);
+            return lval_err("Function passed too many arguments. Got `%i`, expected `%i`", given, total);
+        }
+
+        lval *sym = lval_pop(f->formals, 0);
+
+        if (strcmp(sym->sym, "&") == 0) {
+            if(f->formals->count != 1) {
+                lval_del(a);
+                return lval_err("Function format invalid. Symbol `&` not allowed by single symbol.");
+            }
+            lval *nsym = lval_pop(f->formals, 0);
+            lenv_put(f->env, nsym, builtin_list(e, a));
+            lval_del(sym);
+            lval_del(nsym);
+            break;
+        }
+
+
+
+        lval *val = lval_pop(a, 0);
+        lenv_put(f->env, sym, val);
+        lval_del(sym);
+        lval_del(val);
+    }
+
+    lval_del(a);
+
+    if (f->formals->count > 0 &&  strcmp(f->formals->cell[0]->sym, "&") == 0) {
+        if (f->formals->count != 2) {
+            return lval_err("Function format invalid. ""Symbol `&` not followed by single symbol.");
+        }
+
+        /* Pop and delete '&' symbol */
+        lval_del(lval_pop(f->formals, 0));
+
+        /* Pop next symbol and create empty list */
+        lval* sym = lval_pop(f->formals, 0);
+        lval* val = lval_qexpr();
+
+        /* Bind to environment and delete */
+        lenv_put(f->env, sym, val);
+        lval_del(sym);
+        lval_del(val);
+    }
+
+    if (f->formals->count == 0) {
+        f->env->par = e;
+        return builtin_eval(f->env, lval_add(lval_sexpr(), lval_copy(f->body)));
+    } else {
+        return lval_copy(f);
+    }
 }
 
 lval *lval_pop(lval *v, int i) {
@@ -197,7 +295,7 @@ lval * lval_eval_sexpr(lenv *e, lval *v) {
         lval_del(f);
         return lval_err("First element is not a function!");
     }
-    lval *result = f->func(e, v);
+    lval *result = lval_call(e, f, v);
     lval_del(f);
     return result;
 }

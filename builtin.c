@@ -4,6 +4,9 @@
 #include "builtin.h"
 
 #define LASSERT(args, cond, fmt, ...) if (!(cond)) {lval_del(args); return lval_err(fmt, ##__VA_ARGS__);}
+#define LASSERT_NUM(fname, args, nb) if (args->count > nb) {lval_del(args); return lval_err("Function `%s` passed too few arguments", fname);}
+#define LASSERT_TYPE(fname, args, nb, sym) if (args->cell[nb]->type !=sym) {lval_del(args); return lval_err("Function `%s` passed incorrect types at pos `%d`", fname, nb);}
+
 
 char *ltype_name(int t) {
     switch(t) {
@@ -83,24 +86,41 @@ lval *builtin_cons(lenv *e, lval *a) {
     return q;
 }
 
-lval *builtin_def(lenv *e, lval *a) {
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function `def` passed incorrect type!");
+lval *builtin_var(lenv *e, lval *a, char *func) {
+    LASSERT_TYPE(func, a, 0, LVAL_QEXPR);
     lval *syms = a->cell[0];
 
     /* Ensure all elements of first list are symbols */
     for (int i = 0; i < syms->count; i ++) {
-        LASSERT(a, syms->cell[i]->type == LVAL_SYM, "Function `def` cannot define non-symbol!");
+        LASSERT(a, syms->cell[i]->type == LVAL_SYM,
+                "Function `%s` cannot define non-symbol. Got `%s`, expected `%s`.",
+                func, ltype_name(syms->cell[i]->type), ltype_name(LVAL_SYM));
     }
 
     /* Check correct number of symbols and values */
-    LASSERT(a, syms->count == a->count - 1, "Function `def` connot define incorrect number of values to symbols");
+    LASSERT(a, syms->count == a->count - 1,
+            "Function `%s` connot define incorrect number of values to symbols. Got `%i`, expected `%i`.",
+            func, syms->count, a->count - 1);
 
     for (int i = 0; i < syms->count; i ++) {
-        lenv_put(e, syms->cell[i], a->cell[i + 1]);
+        if (strcmp(func, "def") == 0) {
+            lenv_def(e, syms->cell[i], a->cell[i + 1]);
+        }
+        if (strcmp(func, "def") == 0) {
+            lenv_put(e, syms->cell[i], a->cell[i + 1]);
+        }
     }
 
     lval_del(a);
     return lval_sexpr();
+}
+
+lval *builtin_def(lenv *e, lval *a) {
+    return builtin_var(e, a, "def");
+}
+
+lval *builtin_put(lenv *e, lval *a) {
+    return builtin_var(e, a, "=");
 }
 
 lval *builtin_eval(lenv *e, lval *a) {
@@ -198,6 +218,23 @@ lval *builtin_max(lenv *e, lval *a) {
     return builtin_op(e, a, "max");
 }
 
+lval *builtin_lambda(lenv *e, lval *a) {
+    LASSERT_NUM("\\", a, 2);
+    LASSERT_TYPE("\\", a, 0, LVAL_QEXPR);
+    LASSERT_TYPE("\\", a, 1, LVAL_QEXPR);
+    for (int i=0; i < a->cell[0]->count; i++) {
+        LASSERT(a, (a->cell[0]->cell[i]->type == LVAL_SYM),
+                "Cannot define non-symbol. Got `%s`, expecting `s`",
+                ltype_name(a->cell[0]->cell[i]->type), ltype_name(LVAL_SYM));
+    }
+
+    lval *formals = lval_pop(a, 0);
+    lval *body = lval_pop(a, 0);
+    lval_del(a);
+
+    return lval_lambda(formals, body);
+}
+
 void lenv_add_builtin(lenv *e, char *name, lbuiltin func) {
     lval *k = lval_sym(name);
     lval *v = lval_func(func);
@@ -216,12 +253,14 @@ void register_builtins(lenv *e) {
     lenv_add_builtin(e, "len", builtin_len);
     lenv_add_builtin(e, "list", builtin_list);
     lenv_add_builtin(e, "tail", builtin_tail);
+    lenv_add_builtin(e, "\\",  builtin_lambda);
     lenv_add_builtin(e, "+", builtin_add);
     lenv_add_builtin(e, "-", builtin_sub);
     lenv_add_builtin(e, "*", builtin_mul);
     lenv_add_builtin(e, "/", builtin_div);
     lenv_add_builtin(e, "^", builtin_pow);
     lenv_add_builtin(e, "%", builtin_mod);
+    lenv_add_builtin(e, "=", builtin_put);
     lenv_add_builtin(e, "min", builtin_min);
     lenv_add_builtin(e, "max", builtin_max);
 }

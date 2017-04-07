@@ -11,6 +11,7 @@ typedef struct lenv lenv;
 typedef lval *(*lbuiltin)(lenv *, lval *);
 
 struct lenv {
+    lenv *par;
     int count;
     char **syms;
     lval **vals;
@@ -19,10 +20,13 @@ struct lenv {
 struct lval {
     int type;
     long num;
-    /* Error and Symbol types have some string data */
     char *err;
     char *sym;
-    lbuiltin func;
+
+    lbuiltin builtin;
+    lenv *env;
+    lval *formals;
+    lval *body;
 
     /* Count and Pointer to a list of `lval*` */
     int count;
@@ -39,6 +43,7 @@ lval *lval_eval(lenv *e, lval *v);
 lval *lval_eval_sexpr(lenv *e, lval *v);
 lval *lval_func(lbuiltin func);
 lval *lval_join(lval *x, lval *y);
+lval *lval_lambda(lval* formals, lval *body);
 lval *lval_num(long x);
 lval *lval_pop(lval *v, int i);
 void lval_print(lval *v);
