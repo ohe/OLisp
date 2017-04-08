@@ -10,26 +10,34 @@
 
 int main(int argc, char **argv) {
 
-    mpc_parser_t *Number = mpc_new("number");
-    mpc_parser_t *Symbol = mpc_new("symbol");
-    mpc_parser_t *Expr = mpc_new("expr");
-    mpc_parser_t *Sexpr = mpc_new("sexpr");
-    mpc_parser_t *Qexpr = mpc_new("qexpr");
-    mpc_parser_t *OLisp = mpc_new("olisp");
+    Comment = mpc_new("comment");
+    Number = mpc_new("number");
+    String = mpc_new("string");
+    Symbol = mpc_new("symbol");
+    Expr = mpc_new("expr");
+    Sexpr = mpc_new("sexpr");
+    Qexpr = mpc_new("qexpr");
+    OLisp = mpc_new("olisp");
 
     mpc_result_t result;
+
+    /*string : /\"(\\\\.|[^\"])*\"/ ; \
+     * For managing doubles
+     *       double   : /-?[0-9]+\\.[0-9]+/ ;                   \
+     */
 
     mpca_lang(MPCA_LANG_DEFAULT,
               "                                                                                              \
                number   : /-?[0-9]+/;                                                                        \
                symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;                                                 \
-               expr     : <number> | <symbol> | <sexpr> | <qexpr>;                                           \
+               string   : /\"(\\\\.|[^\"])*\"/ ;                                                             \
+               comment  : /;[^\\r\\n]*/  ;                                                                   \
+               expr     : <number> | <symbol> | <string> | <comment> | <sexpr> | <qexpr>;                    \
                sexpr    : '(' <expr>* ')';                                                                   \
                qexpr    : '{' <expr>* '}';                                                                   \
                olisp    : /^/ <expr>* /$/;                                                                   \
               ",
-              Number, Symbol, Expr, Sexpr, Qexpr, OLisp);
-
+              Number, Symbol, String, Comment, Expr, Sexpr, Qexpr, OLisp);
 
     puts("OLisp v0");
     puts("Press Ctrl+c to exit.");
@@ -37,12 +45,21 @@ int main(int argc, char **argv) {
     lenv *e = lenv_new();
     register_builtins(e);
 
+    if (argc >= 2) {
+        for (int i = 1; i <argc; i++) {
+            lval *args = lval_add(lval_sexpr(), lval_str(argv[i]));
+            lval *x = builtin_load(e, args);
+            if (x->type == LVAL_ERR) lval_println(x);
+            lval_del(x);
+        }
+    }
+
     while (1) {
         char *input = readline("()lisp> ");
         add_history(input);
 
         if (mpc_parse("<stdin>", input, OLisp, &result)) {
-            /* mpc_ast_print(result.output); */
+            //mpc_ast_print(result.output);
             lval *x = lval_eval(e, lval_read(result.output));
             lval_println(x);
             lval_del(x);
@@ -55,6 +72,6 @@ int main(int argc, char **argv) {
     }
 
     lenv_del(e);
-    mpc_cleanup(6, Number, Symbol, Expr, Sexpr, Qexpr, OLisp);
+    mpc_cleanup(8, Number, Symbol, String, Comment, Expr, Sexpr, Qexpr, OLisp);
     return 0;
 }

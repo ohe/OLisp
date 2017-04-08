@@ -3,7 +3,7 @@
 
 #include "mpc.h"
 
-enum LVAL_TYPE {LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR};
+enum LVAL_TYPE {LVAL_NUM, LVAL_ERR, LVAL_STR, LVAL_SYM, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR};
 
 typedef struct lval lval;
 typedef struct lenv lenv;
@@ -22,6 +22,7 @@ struct lval {
     long num;
     char *err;
     char *sym;
+    char *str;
 
     lbuiltin builtin;
     lenv *env;
@@ -38,6 +39,7 @@ struct lval {
 lval *lval_add(lval *v, lval *x);
 lval *lval_copy(lval *v);
 void lval_del(lval *v);
+int lval_eq(lval *a, lval *b);
 lval *lval_err(char *fmt, ...);
 lval *lval_eval(lenv *e, lval *v);
 lval *lval_eval_sexpr(lenv *e, lval *v);
@@ -50,6 +52,7 @@ void lval_print(lval *v);
 void lval_println(lval *v);
 lval* lval_read(mpc_ast_t *t);
 lval *lval_sexpr(void);
+lval *lval_str(char *string);
 lval *lval_sym(char *symbol);
 lval *lval_take(lval *v, int i);
 
